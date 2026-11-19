@@ -1,17 +1,5 @@
 #include <cuda.h>
-#include <iostream>
-
-#define CHECK_CUDA(call)                                                       \
-  do {                                                                         \
-    CUresult err = (call);                                                     \
-    if (err != CUDA_SUCCESS) {                                                 \
-      const char *errStr = NULL;                                               \
-      cuGetErrorString(err, &errStr);                                          \
-      fprintf(stderr, "CUDA Error at %s:%d - %s (%d)\n", __FILE__, __LINE__,   \
-              errStr ? errStr : "Unknown", err);                               \
-      exit(EXIT_FAILURE);                                                      \
-    }                                                                          \
-  } while (0)
+#include "utils.h"
 
 void test_memop_ping() {
     // Initialize cuda driver API
@@ -71,5 +59,6 @@ void test_memop_ping() {
 }
 
 int main() {
-    test_memop_ping();
+  test_memop_ping();
+  return 0;
 }
