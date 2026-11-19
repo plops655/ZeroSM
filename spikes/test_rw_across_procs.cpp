@@ -1,9 +1,40 @@
 #include <cstring>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include "utils.h"
 #include <unistd.h>
 
+ssize_t send_fd(int send_socket, int fd) {
+    char buffer[1];
+    buffer[0] = '0';
+
+    iovec iov{};
+    iov.iov_base = buffer;          
+    iov.iov_len = sizeof(buffer);  
+
+    msghdr msg{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = fd;          
+
+    // Send fd over socket
+    return sendmsg(send_socket, &msg, 0);
+}
+
+ssize_t recv_fd(int recv_socket, int fd) {
+    char buffer[1];
+    buffer[0] = '0';
+    
+    iovec iov{};
+    iov.iov_base = buffer;          
+    iov.iov_len = sizeof(buffer);  
+
+    msghdr msg{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = fd;   
+
+    return recvmsg(recv_socket, &msg, 0);
+}
 
 void test_rw_across_procs() {
     int sv[2];
