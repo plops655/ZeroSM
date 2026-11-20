@@ -5,8 +5,9 @@
 #include "utils.h"
 #include <unistd.h>
 #include <cuda.h>
+#include <math.h>
 
-int init_cuda() {
+CUdevice init_cuda() {
     // Initialize cuda driver API
     CHECK_CUDA(cuInit(0));
 
@@ -15,7 +16,7 @@ int init_cuda() {
 
     if (count == 0) {
         printf("No GPUs available");
-        return -1;
+        exit(1);
     }
     // Get the cuda device and context
     CUdevice device;
@@ -26,13 +27,13 @@ int init_cuda() {
     CHECK_CUDA(cuDeviceGetAttribute(&pi2, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR_SUPPORTED, device));
     if (pi1 == 0 || pi2 == 0) {
         printf("CUDA device attributs incorrect.");
-        return -1;
+        exit(1);
     }
 
     CUcontext context;
     cuDevicePrimaryCtxRetain(&context, device);
     cuCtxSetCurrent(context);
-    return 0;
+    return device;
 }
 
 void send_fd(int send_socket, int fd) {
@@ -102,13 +103,14 @@ int recv_fd(int recv_socket) {
     return fd;
 }
 
+size_t round_up_mem(size_t desired_mem, size_t granularity) {
+    return static_cast<size_t>((desired_mem/granularity) * granularity);
+}
+
 void test_rw_across_procs() {
     int sv[2];
     CHECK_SYS(socketpair(AF_UNIX, SOCK_STREAM, 0, sv));
-    int cuda_init_res = init_cuda();
-    if (cuda_init_res == -1) {
-        return;
-    }
+    CUdevice device = init_cuda();
     pid_t pid = fork();
     if (pid == -1) {
         close(sv[0]);
@@ -129,7 +131,27 @@ void test_rw_across_procs() {
         _exit(0);
     } 
     close(sv[1]);
+    CUmemAllocationProp prop{};
+    // Keep physical memory pinned 
+    prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    // Set physical memory to device
+    prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    // Set device
+    prop.location.id = device;
+    // Declare that this allocation will be exported as a fd
+    prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+
+    size_t granularity;
+    cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+    
+    size_t memAlloc = round_up_mem(1<<20, granularity);
+    CUmemGenericAllocationHandle handle;
+    CHECK_CUDA(cuMemCreate(&handle, memAlloc, &prop, 0));
+
     int fd = memfd_create("inter-process", 0);
+
+    CHECK_CUDA(cuMemExportToShareableHandle(&fd, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+
     char buffer[20] = "Hi there!";
     CHECK_SYS(pwrite(fd, buffer, 20, 0));
 
@@ -137,6 +159,7 @@ void test_rw_across_procs() {
     close(fd);
     close(sv[0]);
 
+    CHECK_CUDA(cuDevicePrimaryCtxRelease(device));
     int status;
     CHECK_SYS(waitpid(pid, &status, 0));
     
