@@ -4,6 +4,36 @@
 #include <sys/mman.h>
 #include "utils.h"
 #include <unistd.h>
+#include <cuda.h>
+
+int init_cuda() {
+    // Initialize cuda driver API
+    CHECK_CUDA(cuInit(0));
+
+    int count;
+    CHECK_CUDA(cuDeviceGetCount(&count));
+
+    if (count == 0) {
+        printf("No GPUs available");
+        return -1;
+    }
+    // Get the cuda device and context
+    CUdevice device;
+    CHECK_CUDA(cuDeviceGet(&device, 0));
+
+    int pi1, pi2;
+    CHECK_CUDA(cuDeviceGetAttribute(&pi1, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device));
+    CHECK_CUDA(cuDeviceGetAttribute(&pi2, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR_SUPPORTED, device));
+    if (pi1 == 0 || pi2 == 0) {
+        printf("CUDA device attributs incorrect.");
+        return -1;
+    }
+
+    CUcontext context;
+    cuDevicePrimaryCtxRetain(&context, device);
+    cuCtxSetCurrent(context);
+    return 0;
+}
 
 void send_fd(int send_socket, int fd) {
     alignas(cmsghdr) char buffer[CMSG_SPACE(sizeof(int))] = {};
@@ -75,6 +105,10 @@ int recv_fd(int recv_socket) {
 void test_rw_across_procs() {
     int sv[2];
     CHECK_SYS(socketpair(AF_UNIX, SOCK_STREAM, 0, sv));
+    int cuda_init_res = init_cuda();
+    if (cuda_init_res == -1) {
+        return;
+    }
     pid_t pid = fork();
     if (pid == -1) {
         close(sv[0]);
